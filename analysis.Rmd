@@ -1,0 +1,153 @@
+---
+title: "Pitch Type Analysis"
+author: "Yu Wu (yuw5@illinois.edu)"
+date: "12/1/2020"
+output:
+  html_document: 
+    theme: default
+    toc: yes
+---
+
+```{r, setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center')
+```
+
+```{r, load-packages, include = FALSE}
+# load packages
+library("caret")
+library("skimr")
+```
+
+```{r read-data, warning = FALSE, message = FALSE}
+# read subset of data
+pitches_2020_regular = readr::read_csv("data/pitches_2020_regular.csv")
+pitches_2020_missing = readr::read_csv("data/pitches_2020_missing.csv")
+pitches_2020_post = readr::read_csv("data/pitches_2020_post.csv")
+```
+
+***
+
+## Abstract
+
+This analysis is about building a model to determine base ball pitches. Base ball is popular in United States, and building a model would help the professional teams to practice with players and create strategies. The methods I used to build models are cross validation, KNN classification and Decision Tree classification.In the end, I found a Decision Tree model that have $83.57%$ accuracy. This value is not very high, but it useful enough to help professional players in trainning.
+***
+
+## Introduction
+
+In this analysis, we are going to build a model for determining base ball pitch types using the data set given in the [`baseballr`](https://billpetti.github.io/baseballr/) package written by [Bill Petti](https://billpetti.github.io/). The purpose of building this model is to help people decide the baseball pitch result before being reported. With the models we built, a team can look at the features of a game and come up with the pitch type, and then practice or create strategies accordingly. 
+
+***
+
+## Methods
+
+The first step is read in the data and make it manageable. The original data set comes from [`baseballr`](https://billpetti.github.io/baseballr/) package and it has already been cleaned, thus we do not need to deal with `NA`s. However, there are three data sets, one with missing pitch types which we definitely would not use, one with complete data from the 2020 regular season but it was too big and it is hard for our PC to process, one with complete data from the 2020 post season. The post season data is in appropriate size and we will analyze on that data.
+
+The next step to create a model is splitting the data. Normally, we should firstly test-train split then estimate-validate split the data. However, I would use the `train` function from `caret` package this time, and the function will do the cross validation for us and thus there is no need to to estimate-validate split the data manually. 
+
+One additional step in this analysis is that in our raw data, some variables are useless, such as date and player name and number. If we include these variables in our model, it could cause errors and make our model less effective. To make sure we don't have any of useless variables in our model we need to drop the following columns:
+
+- game_date
+- player_name
+- batter
+- pitcher
+
+Since there is a few `NA`s in the data set, we can use `na.omit()` to clear them out.
+
+```{r, echo=TRUE}
+# test train split the data
+raw = pitches_2020_post
+raw = subset(raw, select = -c(game_date, player_name, batter, pitcher))
+raw$pitch_type = as.factor(raw$pitch_type)
+raw = na.omit(raw)
+
+set.seed(42)
+trn_idx = createDataPartition(raw$pitch_type, p = 0.80, list = TRUE)
+trn = raw[trn_idx$Resample1, ]
+tst = raw[-trn_idx$Resample1, ]
+```
+
+
+### Data
+
+The data we currently have is the train data and test data. There are 21 variables in the data set, 20 being the feature variables and one being the response variable. The response variable is `pitch_type`, which is a factor with all kinds of pitch types. The other variables principal components to the prediction, including the data of velocity and direction of the game.
+
+
+### Modeling
+
+In the modeling part, we are using KNN and tree models to do the classification. To find the best tuning parameters, we are doing a 5-fold cross validation. The whole detailed process of cross validation and fitting models and comparing the metrics are dealt by the `train` function from `caret` package.
+
+```{r}
+set.seed(42)
+
+cv_5 = trainControl(method = "cv", number = 5)
+
+tree_mod = train(
+  form = pitch_type ~ .,
+  data = trn,
+  method = "rpart",
+  trControl = cv_5,
+  tuneLength = 10
+)
+
+
+knn_mod = train(
+  form = pitch_type ~ .,
+  data = trn,
+  method = "knn",
+  trControl = cv_5,
+  tuneLength = 10
+)
+```
+
+```{r}
+tree_mod
+knn_mod
+```
+
+The Decision Tree Model that produces best accuracy is the model with `cp = 0.003826531` tunning parameter, and the KNN model that produces the best accuracy is the mode with `k = 5` tunning parameter.
+
+***
+
+## Results
+
+From the output in the modeling section above, we have found the best KNN model and the best Decision Tree model by cross validation and looking at the validation accuracy. Now we should fit the models to the training data and test them with the testing data and find the best model we have. We can use the report of `skim` function to check if the testing data is in the same structure as the training data. 
+
+Since we are using `train` function, we can directly predict on the previous models from the result of `train` function, and it will automatically fit the best model to the train data. 
+
+```{r}
+# function to calculate the test accuracy of fraud
+calc_acc = function(mod){
+  predicted = predict(mod, newdata = tst, type = "raw")
+  actual = tst$pitch_type
+  mean(predicted == actual)
+}
+```
+
+
+```{r, echo = TRUE}
+calc_acc(tree_mod)
+calc_acc(knn_mod)
+```
+
+From the result above, we can see that the testing accuracy of KNN model is greater than that of Decision Tree model. Thus KNN model with tunning parameter `k = 5` is our best model.
+
+
+***
+
+## Discussion
+
+The final model we come up with is a decision tree model with `cp = 0` as tunning parameter, and the test accuracy is $83.57%$. This accuracy means that at each game, with the 20 features and our model, the player and coach can have a $83.57%$ confident result predicting the pitch type. The value $83.57%$ is high enough for a player to take actions in the trainning, or for a coach to make strategies. 
+
+***
+
+## Appendix
+
+```{r, echo=TRUE}
+
+skimr::skim(raw)
+skimr::skim(trn)
+skimr::skim(tst)
+
+tree_mod
+knn_mod
+```
